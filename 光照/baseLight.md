@@ -84,6 +84,54 @@
 
    #### 计算漫反射光照
 
+   ​		需要光源的位置向量和片段的位置向量。由于光源的位置是一个静态变量，我们可以简单地在片段着色器中把它声明为uniform：
+
+   ```glsl
+   uniform vec3 lightPos;
+   out vec3 FragPos;
+   
+   void main(){
+   	gl_Position = projection * view * model * vec4(aPos, 1.0);
+     //在世界空间中进行所有的光照计算，因此我们需要一个在世界空间中的顶点位置。我们可以通过把顶点位置属性乘以模型矩阵（不是观察和投影矩阵）来把它变换到世界空间坐标。这个在顶点着色器中很容易完成，所以我们声明一个输出变量，并计算它的世界空间坐标：
+   	FragPos = vec3(model * vec4(aPos,1.0));
+   	Normal = aNormal;
+   }
+   
+   //片段着色器
+   in vec3 FragPos;
+   ```
+
+   ```glsl
+   lightingShader.setVec3("lightPos", lightPos);
+   ```
+
+   添加光照计算
+
+   光的方向向量是光源位置向量与片段位置向量之间的向量差。同时进行标准化，方便计算入射角
+
+   ```glsl
+   vec3 norm = normalize(Normal);
+   vec3 lightDir = normalize(lightPos - FragPos);
+   ```
+
+   下一步，我们对norm和lightDir向量进行点乘，计算光源对当前片段实际的漫发射影响。结果值再乘以光的颜色，得到漫反射分量。两个向量之间的角度越大，漫反射分量就会越小：
+
+   ```glsl
+   //dot 向量点乘运算 ， 结果取最大值输出， 两个向量之间的角度大于90度，点乘的结果就会变成负数
+   float diff = max(dot(norm, lightDir), 0.0);
+   //获取漫反射分量
+   vec3 diffuse = diff * lightColor;
+   ```
+
+   **负数颜色的光照是没有定义的，所以最好避免它**
+
+   现在我们有了环境光分量和漫反射分量，我们把它们相加，然后把结果乘以物体的颜色，来获得片段最后的输出颜色。
+
+   ```glsl
+   vec3 result = (ambient + diffuse) * objectColor;
+   FragColor = vec4(result, 1.0);
+   ```
+
    
 
 3. 镜面光照
