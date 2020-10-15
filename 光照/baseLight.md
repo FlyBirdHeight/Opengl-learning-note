@@ -136,3 +136,47 @@
 
 3. 镜面光照
 
+   ​		镜面光照是依据光的方向向量和物体的法向量来决定的，但是它也依赖于观察方向，例如玩家是从什么方向看着这个片段的。镜面光照是基于光的反射特性。如果我们想象物体表面像一面镜子一样，那么，无论我们从哪里去看那个表面所反射的光，镜面光照都会达到最大化。就如下图所示效果：
+
+   ![avatar](/Users/adsionli/Desktop/生产开发/笔记/opengl/光照/image/basic_lighting_specular_theory.png)
+
+   ​		通过反射法向量周围光的方向来计算反射向量。然后我们计算反射向量和视线方向的角度差，如果夹角越小，那么镜面光的影响就会越大。它的**作用效果就是，当我们去看光被物体所反射的那个方向的时候，我们会看到一个高光。**
+
+   ​		**观察向量**是镜面光照附加的一个变量，我们可以使用**<font style="color:red">观察者世界空间位置和片段的位置来计算它</font>**。之后，我们**<font style="color:red">计算镜面光强度，用它乘以光源的颜色，再将它加上环境光和漫反射分量。</font>**
+
+   ​		代码实现步骤
+
+   ```glsl
+   //所有操作均是在物体的片段着色器中完成
+   //1.设置镜面强度变量（反映到镜面光强中）
+   float specularStrength = 0.5;
+   //2. 声明观察者世界坐标
+   uniform vec3 viewPos;
+   //3. 计算观察向量
+   vec3 viewDir = normalize(viewPos - FrogPos);
+   //4. 计算法向量反射分量
+   //需要注意的是我们对lightDir向量进行了取反。reflect函数要求第一个向量是从光源指向片段位置的向量，但是lightDir当前正好相反，是从片段指向光源（由先前我们计算lightDir向量时，减法的顺序决定）。为了保证我们得到正确的reflect向量，我们通过对lightDir向量取反来获得相反的方向。第二个参数要求是一个法向量，所以我们提供的是已标准化的norm向量。
+   vec3 reflectDir = reflect(-lightDir,norm);
+   //5.获取镜面光强度
+   float spec = pow(max(dot(viewDir,reflectDir),0.0),32);
+   //6.计算镜面分量
+   vec3 specular = specularStrength * spec * lightColor;
+   //7.计算完整的光照
+   vec3 result = ambient * diffuse * specular;
+   FragColor = vec4(result,1.0);
+   ```
+
+   ​		可以注意到在第五步中可以发现，我们取了32次幂，这么做的原因就是因为**这个32是高光的反光度(Shininess)**。**一个物体的反光度越高，反射光的能力越强，散射得越少，高光点就会越小。**在下面的图片里，你会看到不同反光度的视觉效果影响：
+
+   ![avatar](/Users/adsionli/Desktop/生产开发/笔记/opengl/光照/image/basic_lighting_specular_shininess.png)
+
+   ​	我们不希望镜面成分过于显眼，所以我们把指数保持为32。
+
+4. 在顶点着色器中实现的冯氏光照模型叫做Gouraud着色(Gouraud Shading)，而不是冯氏着色(Phong Shading)。记住，由于插值，这种光照看起来有点逊色。冯氏着色能产生更平滑的光照效果。
+
+### 练习
+
+- 目前，我们的光源时静止的，你可以尝试使用sin或cos函数让光源在场景中来回移动。观察光照随时间的改变能让你更容易理解冯氏光照模型。[参考解答](https://learnopengl.com/code_viewer.php?code=lighting/basic_lighting-exercise1)。
+- 尝试使用不同的环境光、漫反射和镜面强度，观察它们怎么是影响光照效果的。同样，尝试实验一下镜面光照的反光度因子。尝试理解为什么某一个值能够有着某一种视觉输出。
+- 在观察空间（而不是世界空间）中计算冯氏光照：[参考解答](https://learnopengl.com/code_viewer.php?code=lighting/basic_lighting-exercise2)。
+- 尝试实现一个Gouraud着色（而不是冯氏着色）。如果你做对了话，立方体的光照应该会[看起来有些奇怪](https://learnopengl-cn.github.io/img/02/02/basic_lighting_exercise3.png)，尝试推理为什么它会看起来这么奇怪：[参考解答](https://learnopengl.com/code_viewer.php?code=lighting/basic_lighting-exercise3)。
