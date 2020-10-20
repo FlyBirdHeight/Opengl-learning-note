@@ -65,5 +65,43 @@ glActiveTexture(GL_TEXTURE0);
 glBindTexture(GL_TEXTURE_2D, diffuseMap);
 ```
 
+### 镜面光贴图
 
+​		你可能会注意到，镜面高光看起来有些奇怪，因为我们的物体大部分都是木头，我们知道木头不应该有这么强的镜面高光的。我们可以将物体的镜面光材质设置为`vec3(0.0)`来解决这个问题，但这也意味着箱子钢制的边框将不再能够显示镜面高光了，我们知道钢铁**应该**是有一些镜面高光的。所以，**我们想要让物体的某些部分以不同的强度显示镜面高光。**这个问题看起来和漫反射贴图非常相似。是巧合吗？我想不是。
+
+​		我们同样可以使用一个专门用于镜面高光的纹理贴图。这也就意味着我们需要生成一个黑白的（如果你想得话也可以是彩色的）纹理，来定义物体每部分的镜面光强度。
+
+​		**镜面高光的强度可以通过图像每个像素的亮度来获取**。镜面光贴图上的每个像素都可以由一个颜色向量来表示，比如说黑色代表颜色向量`vec3(0.0)`，灰色代表颜色向量`vec3(0.5)`。**在片段着色器中，我们接下来会取样对应的颜色值并将它乘以光源的镜面强度。一个像素越「白」(1.0,1.0,1.0)，乘积就会越大，物体的镜面光分量就会越亮。**
+
+​		由于箱子大部分都由木头所组成，而且**木头材质应该没有镜面高光**，所以**漫反射纹理的整个木头部分全部都转换成了黑色**。箱子钢制边框的镜面光强度是有细微变化的，**钢铁本身会比较容易受到镜面高光的影响，而裂缝则不会。**
+
+​		从实际角度来说，木头其实也有镜面高光，尽管它的反光度(Shininess)很小（更多的光被散射），影响也比较小。
+
+#### 采样镜面光贴图
+
+```c++
+//绑定到纹理单元上
+lightingShader.setInt("material.specular", 1);
+...
+glActiveTexture(GL_TEXTURE1);
+glBindTexture(GL_TEXTURE_2D, specularMap);
+```
+
+```glsl
+//修改material结构体，将镜面光改为sampler2D，因为这时候需要用上纹理了
+struct Material {
+    sampler2D diffuse;
+    sampler2D specular;
+    float     shininess;
+};
+//修改镜面光强度
+vec3 ambient  = light.ambient  * vec3(texture(material.diffuse, TexCoords));
+vec3 diffuse  = light.diffuse  * diff * vec3(texture(material.diffuse, TexCoords));  
+vec3 specular = light.specular * spec * vec3(texture(material.specular, TexCoords));
+FragColor = vec4(ambient + diffuse + specular, 1.0);
+```
+
+​		通过使用镜面光贴图我们可以可以对物体设置大量的细节，比如物体的哪些部分需要有**闪闪发光**的属性，我们甚至可以设置它们对应的强度。镜面光贴图能够在漫反射贴图之上给予我们更高一层的控制。
+
+<div style="border:2px solid #f3f4f5;border-radius:5px;padding:15px;margin:10px;background-color:green;color:#ffffff">如果你想另辟蹊径，你也可以在镜面光贴图中使用真正的颜色，不仅设置每个片段的镜面光强度，还设置了镜面高光的颜色。从现实角度来说，镜面高光的颜色大部分（甚至全部）都是由光源本身所决定的，所以这样并不能生成非常真实的视觉效果（这也是为什么图像通常是黑白的，我们只关心强度）。</div>
 
