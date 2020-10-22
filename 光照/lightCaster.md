@@ -141,3 +141,9 @@ specular *= attenuation;
 **OpenGL中聚光是用一个世界空间位置、一个方向和一个切光角(Cutoff Angle)来表示的**，切光角指定了聚光的半径（译注：是圆锥的半径不是距光源距离那个半径）。对于每个片段，我们会计算片段是否位于聚光的切光方向之间（也就是在锥形内），如果是的话，我们就会相应地照亮片段。下面这张图会让你明白聚光是如何工作的：
 
 ![avatar](C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\light_casters_spotlight_angles.png)
+
+- `LightDir`：从片段指向光源的向量。
+- `SpotDir`：聚光所指向的方向。
+- `Phi`$\phi$：指定了聚光半径的切光角。落在这个角度之外的物体都不会被这个聚光所照亮。
+
+- `Theta`$\theta$：LightDir向量和SpotDir向量之间的夹角。在聚光内部的话$\theta$值应该比$\phi$值小。
