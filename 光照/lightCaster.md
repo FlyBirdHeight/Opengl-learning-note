@@ -147,3 +147,82 @@ specular *= attenuation;
 - `Phi`$\phi$：指定了聚光半径的切光角。落在这个角度之外的物体都不会被这个聚光所照亮。
 
 - `Theta`$\theta$：LightDir向量和SpotDir向量之间的夹角。在聚光内部的话$\theta$值应该比$\phi$值小。
+
+所以我们要做的就是计算LightDir向量和SpotDir向量之间的点积（还记得它会返回两个单位向量夹角的余弦值吗？），并将它与切光角$\phi$值对比。
+
+#### 手电筒
+
+**手电筒(Flashlight)是一个位于观察者位置的聚光，通常它都会瞄准玩家视角的正前方**。基本上说，手电筒就是普通的聚光，但它的位置和方向会随着玩家的位置和朝向不断更新。
+
+在片段着色器中我们需要的值有聚光的位置向量（来计算光的方向向量）、聚光的方向向量和一个切光角。我们可以将它们储存在Light结构体中：
+
+```glsl
+struct Light {
+    vec3  position;
+    vec3  direction;
+    float cutOff;
+    ...
+};
+```
+
+```c++
+lightingShader.setVec3("light.position",  camera.Position);
+lightingShader.setVec3("light.direction", camera.Front);
+lightingShader.setFloat("light.cutOff",   glm::cos(glm::radians(12.5f)));
+```
+
+我们并没有给切光角设置一个角度值，反而是用角度值计算了一个余弦值，将余弦结果传递到片段着色器中。这样做的原因是在片段着色器中，我们会计算`LightDir`和`SpotDir`向量的点积，这个点积返回的将是一个余弦值而不是角度值，所以我们不能直接使用角度值和余弦值进行比较。为了获取角度值我们需要计算点积结果的反余弦，这是一个开销很大的计算。所以为了节约一点性能开销，我们将会计算切光角对应的余弦值，并将它的结果传入片段着色器中。由于这两个角度现在都由余弦角来表示了，我们可以直接对它们进行比较而不用进行任何开销高昂的计算。
+
+切光角的设置主要是为了_节省开销_
+
+```glsl
+//计算片段指向光源方向的向量与聚光方向向量的点乘,取反的是因为我们想让向量指向光源而不是从光源出发
+float theta = dot(lightDir,normalize(-light.direction));
+if(theta > light.cutOff) {       
+  // 执行光照计算
+}else{
+    // 否则，使用环境光，让场景在聚光之外时不至于完全黑暗
+  color = vec4(light.ambient * vec3(texture(material.diffuse, TexCoords)), 1.0);
+}  
+```
+
+这里会发现使用的是theta > light.cutOff，这个原因就是因为余弦图像下图所示：
+
+![avatar](C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\light_casters_cos.png)
+
+它是随角度增大而变小的(在0°-180°范围内)，所以当theta大的时候，角度一定更小
+
+#### 平滑/软化边缘
+
+将上一部分的圆锥体当作内圆锥，在外面再套一个大一些的外圆锥体，使内圆锥到外圆锥之间的光变化逐渐减暗，直到外圆锥的边界。再定义一个余弦值来代表聚光方向向量和外圆锥向量（等于它的半径）的夹角。然后，如果一个片段处于内外圆锥之间，将会给它计算出一个0.0到1.0之间的强度值。如果片段在内圆锥之内，它的强度就是1.0，如果在外圆锥之外强度值就是0.0。
+
+用下面这个公式来计算这个值：
+$$
+\begin{equation} I = \frac{cos\theta - cos\gamma}{\epsilon} \end{equation}
+$$
+这里ϵ(Epsilon)是内（ϕ）和外圆锥（γ）之间的余弦值差（ϵ=ϕ−γ）。最终的I值就是在当前片段聚光的强度。
+
+这里的$\theta$是指LightDir向量和SpotDir向量之间的夹角。$\theta$的范围在[0,$\gamma$]才会有聚光效果！
+
+| cos$\theta$ | $\theta$ | cos$\phi$ | $\phi$ | cos$\gamma$ | $\gamma$ | ϵ = (cos$\phi$-cos$\gamma$) | $I$                           |
+| :---------- | :------- | :-------- | :----- | :---------- | :------- | :-------------------------- | :---------------------------- |
+| 0.87        | 30       | 0.91      | 25     | 0.82        | 35       | 0.91 - 0.82 = 0.09          | 0.87 - 0.82 / 0.09 = 0.56     |
+| 0.9         | 26       | 0.91      | 25     | 0.82        | 35       | 0.91 - 0.82 = 0.09          | 0.9 - 0.82 / 0.09 = 0.89      |
+| 0.97        | 14       | 0.91      | 25     | 0.82        | 35       | 0.91 - 0.82 = 0.09          | 0.97 - 0.82 / 0.09 = 1.67     |
+| 0.83        | 34       | 0.91      | 25     | 0.82        | 35       | 0.91 - 0.82 = 0.09          | 0.83 - 0.82 / 0.09 = 0.11     |
+| 0.64        | 50       | 0.91      | 25     | 0.82        | 35       | 0.91 - 0.82 = 0.09          | 0.64 - 0.82 / 0.09 = -2.0     |
+| 0.966       | 15       | 0.9978    | 12.5   | 0.953       | 17.5     | 0.966 - 0.953 = 0.0448      | 0.966 - 0.953 / 0.0448 = 0.29 |
+
+我们现在有了一个在聚光外是负的，在内圆锥内大于1.0的，在边缘处于两者之间的强度值了。如果我们正确地约束(Clamp)这个值，在片段着色器中就不再需要`if-else`了，我们能够使用计算出来的强度值直接乘以光照分量：
+
+```glsl
+float theta     = dot(lightDir, normalize(-light.direction));
+float epsilon   = light.cutOff - light.outerCutOff;
+float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);    
+...
+// 将不对环境光做出影响，让它总是能有一点光
+diffuse  *= intensity;
+specular *= intensity;
+...
+```
+
