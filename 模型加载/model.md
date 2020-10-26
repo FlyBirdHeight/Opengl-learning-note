@@ -249,5 +249,56 @@ void Draw(Shader shader)
        注意，我们假设了模型文件中纹理文件的路径是相对于模型文件的本地(Local)路径，比如说与模型文件处于同一目录下。我们可以将纹理位置字符串拼接到之前（在loadModel中）获取的目录字符串上，来获取完整的纹理路径（这也是为什么GetTexture函数也需要一个目录字符串）。
        </p>在网络上找到的某些模型会对纹理位置使用绝对(Absolute)路径，这就不能在每台机器上都工作了。在这种情况下，你可能会需要手动修改这个文件，来让它对纹理使用本地路径（如果可能的话）。</div>
 
-### 重大优化
+### 重大优化(剪枝操作)
 
+​		大多数场景都会在多个网格中重用部分纹理。还是想想一个房子，它的墙壁有着花岗岩的纹理。这个纹理也可以被应用到地板、天花板、楼梯、桌子，甚至是附近的一口井上。加载纹理并不是一个开销不大的操作，在我们当前的实现中，即便同样的纹理已经被加载过很多遍了，对每个网格仍会加载并生成一个新的纹理。这很快就会变成模型加载实现的性能瓶颈。
+
+​		所以我们会对模型的代码进行调整，将所有加载过的纹理全局储存，每当我们想加载一个纹理的时候，首先去检查它有没有被加载过。如果有的话，我们会直接使用那个纹理，并跳过整个加载流程，来为我们省下很多处理能力。为了能够比较纹理，我们还需要储存它们的路径：
+
+```c++
+struct Texture {
+    unsigned int id;
+    string type;
+    aiString path;  // 我们储存纹理的路径用于与其它纹理进行比较
+};
+```
+
+```c++
+//已经加载过的纹理
+vector<Texture> textures_loaded;
+```
+
+在`loadMaterialTextures`函数中，我们希望将纹理的路径与储存在`textures_loaded`这个vector中的所有纹理进行比较，看看当前纹理的路径是否与其中的一个相同。如果是的话，则跳过纹理加载/生成的部分，直接使用定位到的纹理结构体为网格的纹理。更新后的函数如下：
+
+```c++
+vector<Texture> textures;
+    for(unsigned int i = 0; i < mat->GetTextureCount(type); i++)
+    {
+        aiString str;
+        mat->GetTexture(type, i, &str);
+        bool skip = false;
+        //遍历一下是否存在已经加载过的纹理路径
+        for(unsigned int j = 0; j < textures_loaded.size(); j++)
+        {
+            if(std::strcmp(textures_loaded[j].path.data(), str.C_Str()) == 0)
+            {
+                textures.push_back(textures_loaded[j]);
+                skip = true; 
+                break;
+            }
+        }
+        if(!skip)
+        {   // 如果纹理还没有被加载，则加载它
+            Texture texture;
+            texture.id = TextureFromFile(str.C_Str(), directory);
+            texture.type = typeName;
+            texture.path = str.C_Str();
+            textures.push_back(texture);
+            textures_loaded.push_back(texture); // 添加到已加载的纹理中
+        }
+    }
+    return textures;
+```
+
+<div style="padding:15px;margin:10px;border-radius:5px;background-color:red;border:2px solid red;color:#f0f0f0">教程里这个代码要加载其他obj模型必须要带有相应的mtl文件，而且obj模型的所有模型部件都必须至少有一个漫反射贴图，也就是说，这份代码不支持没有贴图的模型（哪怕是只有一小部分没有贴图），网上很多的模型，比如一个汽车的模型，汽车是黑色的，通常建模者会给整个车体指定一种黑色高光材质，而没有贴图（这样是为了节约资源，如果想要表现车身上的磨损生锈这样的细节效果，通常会做一个贴图），然而代码中没有考虑这样的情况，所以程序很可能会在读取模型processMesh函数那里崩溃。所以要读取这样的模型你可能要稍微修改一下代码，考虑没有贴图的情况（但是mtl文件还是得有，里面存有材质信息，obj本身没有材质信息；当然你还可以修改代码考虑没有mtl文件的情况下加载一个默认的材质），但是对于有贴图的模型，本人测试大部分obj模型还是支持得很好的
+至于很多人的纹理加载不出来可能是mtl文件里的贴图路径问题，mtl本身是一个文本文件，可以用记事本打开，把一些贴图的绝对路径比如C://tex1.jpg这样的修改成 tex1.jpg这样的相对路径，然后把贴图和模型扔在同一个文件夹里应该就能正常读取了</div>
