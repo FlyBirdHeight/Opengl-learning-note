@@ -89,4 +89,146 @@ void main()
     glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     </p>
     </div></div>
+### 混合
+
+虽然直接丢弃片段很好，但它不能让我们渲染半透明的图像。我们要么渲染一个片段，要么完全丢弃它。要想渲染有多个透明度级别的图像，我们**需要启用混合(Blending)**。和OpenGL大多数的功能一样，我们可以启用GL_BLEND来启用混合：
+
+```c++
+GL_ENABLE(GL_BLEND);
+```
+
+启用了混合之后，我们需要告诉OpenGL它该**如何**混合。
+
+OpenGL中的混合是通过下面这个方程来实现的：
+$$
+\begin{equation}\bar{C}_{result} = \bar{\color{green}C}_{source} * \color{green}F_{source} + \bar{\color{red}C}_{destination} * \color{red}F_{destination}\end{equation}
+$$
+
+- $\bar{\color{green}C}_{source}$：源颜色向量。这是源自纹理的颜色向量。
+- $\bar{\color{red}C}_{destination}$：目标颜色向量。这是当前储存在颜色缓冲中的颜色向量。
+- $\color{green}F_{source}$：源因子值。指定了alpha值对源颜色的影响。
+- $\color{red}F_{destination}$：目标因子值。指定了alpha值对目标颜色的影响。
+
+​        片段着色器运行完成后，并且所有的测试都通过之后，这个混合方程(Blend Equation)才会应用到片段颜色输出与当前颜色缓冲中的值（当前片段之前储存的之前片段的颜色）上。源颜色和目标颜色将会由OpenGL自动设定，但源因子和目标因子的值可以由我们来决定。
+
+例子：
+
+<img src="../image/blending_equation.png" alt="avatar" style="zoom:67%;" />
+
+​		我们有两个方形，我们希望将这个半透明的绿色方形绘制在红色方形之上。红色的方形将会是目标颜色（所以它应该先在颜色缓冲中），我们将要在这个红色方形之上绘制这个绿色方形。
+
+​		问题来了：我们将因子值设置为什么？嘛，我们至少**想让绿色方形乘以它的alpha值，所以我们想要将$F_{src}$设置为源颜色向量的alpha值，也就是0.6。接下来就应该清楚了，目标方形的贡献应该为剩下的alpha值。如果绿色方形对最终颜色贡献了60%，那么红色方块应该对最终颜色贡献了40%**，即`1.0 - 0.6`。所以我们将$F_{destination}$设置为1减去源颜色向量的alpha值。这个方程变成了：
+$$
+\begin{equation}\bar{C}_{result} = \begin{pmatrix} \color{red}{0.0} \\ \color{green}{1.0} \\ \color{blue}{0.0} \\ \color{purple}{0.6} \end{pmatrix} * \color{green}{0.6} + \begin{pmatrix} \color{red}{1.0} \\ \color{green}{0.0} \\ \color{blue}{0.0} \\ \color{purple}{1.0} \end{pmatrix} * \color{red}{(1 - 0.6)} \end{equation}
+$$
+​		结果就是重叠方形的片段包含了一个60%绿色，40%红色的一种脏兮兮的颜色：
+
+![avatar](C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\blending_equation_mixed.png)
+
+​		最终的颜色将会被储存到颜色缓冲中，替代之前的颜色。
+
+​		这样子很不错，但我们该如何让OpenGL使用这样的因子呢？正好有一个专门的函数，叫做`glBlendFunc`。
+
+​		`glBlendFunc(GLenum sfactor, GLenum dfactor)`函数接受两个参数，来设置源和目标因子。OpenGL为我们定义了很多个选项，我们将在下面列出大部分最常用的选项。注意常数颜色向量$\bar{\color{blue}C}_{constant}$可以通过`glBlendColor`函数来另外设置。
+
+| 选项                          | 值                                                        |
+| :---------------------------- | :-------------------------------------------------------- |
+| `GL_ZERO`                     | 因子等于0                                                 |
+| `GL_ONE`                      | 因子等于1                                                 |
+| `GL_SRC_COLOR`                | 因子等于源颜色向量$\bar{\color{green}C}_{source}$         |
+| `GL_ONE_MINUS_SRC_COLOR`      | 因子等于1−$\bar{\color{green}C}_{source}$                 |
+| `GL_DST_COLOR`                | 因子等于目标颜色向量$\bar{\color{red}C}_{destination}$    |
+| `GL_ONE_MINUS_DST_COLOR`      | 因子等于1−$\bar{\color{red}C}_{destination}$              |
+| `GL_SRC_ALPHA`                | 因子等于$\bar{\color{green}C}_{source}$的$alpha$分量      |
+| `GL_ONE_MINUS_SRC_ALPHA`      | 因子等于1−$\bar{\color{green}C}_{source}$的$alpha$分量    |
+| `GL_DST_ALPHA`                | 因子等于$\bar{\color{red}C}_{destination}$的$alpha$分量   |
+| `GL_ONE_MINUS_DST_ALPHA`      | 因子等于1−$\bar{\color{red}C}_{destination}$的$alpha$分量 |
+| `GL_CONSTANT_COLOR`           | 因子等于常数颜色向量$\bar{\color{blue}C}_{constant}$      |
+| `GL_ONE_MINUS_CONSTANT_COLOR` | 因子等于1−$\bar{\color{blue}C}_{constant}$                |
+| `GL_CONSTANT_ALPHA`           | 因子等于$\bar{\color{blue}C}_{constant}$的$alpha$分量     |
+| `GL_ONE_MINUS_CONSTANT_ALPHA` | 因子等于1−$\bar{\color{blue}C}_{constant}$的$alpha$分量   |
+
+为了获得之前两个方形的混合结果，我们需要使用源颜色向量的$alpha$作为源因子，使用$1−alpha$作为目标因子。这将会产生以下的`glBlendFunc`：
+
+```c++
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+```
+
+还可以使用`glBlendFuncSeparate`为RGB和alpha通道分别设置不同的选项
+
+```c++
+glBlendFuncSeperate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+```
+
+​		这个函数和我们之前设置的那样设置了RGB分量，但这样只能让最终的alpha分量被源颜色向量的alpha值所影响到。
+
+​		OpenGL甚至给了我们更多的灵活性，允许我们改变方程中源和目标部分的运算符。当前源和目标是相加的，但如果愿意的话，我们也可以让它们相减。`glBlendEquation(GLenum mode)`允许我们设置运算符，它提供了三个选项：
+
+- `GL_FUNC_ADD`：默认选项，将两个分量相加：$\bar{C}_{result} = \color{green}{Src} + \color{red}{Dst}$。
+- `GL_FUNC_SUBTRACT`：将两个分量相减：$\bar{C}_{result} = \color{green}{Src} - \color{red}{Dst}$。
+- `GL_FUNC_REVERSE_SUBTRACT`：将两个分量相减，但顺序相反：$\bar{C}_{result} = \color{red}{Dst} - \color{green}{Src}$。
+
+### 渲染半透明纹理
+
+代码实现如下:
+
+```c++
+glEnable(GL_BLEND);
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_APLAH);
+```
+
+```glsl
+//启用了混合，就不需要去丢弃片段了
+#version 330 core
+out vec4 FragColor;
+
+in vec2 TexCoords;
+
+uniform sampler2D texture1;
+
+void main()
+{             
+    FragColor = texture(texture1, TexCoords);
+}
+```
+
+​		现在（每当OpenGL渲染了一个片段时）它都会**将当前片段的颜色和当前颜色缓冲中的片段颜色根据alpha值来进行混合**。由于窗户纹理的玻璃部分是半透明的，我们应该能通窗户中看到背后的场景了。
+
+<img src="../image/blending_incorrect_order.png" alt="avatar" style="zoom:50%;" />
+
+​		但是这里存在一些问题，前面的窗户的透明部分遮蔽了背后的窗户。
+
+​		发生这一现象的原因是，深度测试和混合一起使用的话会产生一些麻烦。当写入深度缓冲时，深度缓冲不会检查片段是否是透明的，所以透明的部分会和其它值一样写入到深度缓冲中。结果就是窗户的整个四边形不论透明度都会进行深度测试。即使透明的部分应该显示背后的窗户，深度测试仍然丢弃了它们。
+
+​		所以我们不能随意地决定如何渲染窗户，让深度缓冲解决所有的问题了。这也是混合变得有些麻烦的部分。要想保证窗户中能够显示它们背后的窗户，我们需要首先绘制背后的这部分窗户。这也就是说在绘制的时候，我们必须先手动将窗户按照最远到最近来排序，再按照顺序渲染。
+
+### 窗户绘制顺序
+
+​		要想让混合在多个物体上工作，我们需要**最先绘制最远的物体，最后绘制最近的物体**。普通不需要混合的物体仍然可以使用深度缓冲正常绘制，所以它们不需要排序。但我们仍**要保证它们在绘制（排序的）透明物体之前已经绘制完毕了**。当绘制一个有不透明和透明物体的场景的时候，大体的原则如下：
+
+1. 先绘制所有不透明的物体。
+2. 对所有透明的物体排序。
+3. 按顺序绘制所有透明的物体。
+
+​        **排序透明物体的一种方法是，从*观察者视角*获取物体的距离**。这可以**通过计算摄像机位置向量和物体的位置向量之间的距离所获得**。接下来我们把距离和它对应的位置向量存储到一个STL库的map数据结构中。map会自动根据键值(Key)对它的值排序，所以只要我们添加了所有的位置，并以它的距离作为键，它们就会自动根据距离值排序了。
+
+```c++
+std::map<float, glm::vec3> sorted;
+for (unsigned int i = 0; i < windows.size(); i++)
+{
+    float distance = glm::length(camera.Position - windows[i]);
+    sorted[distance] = windows[i];
+}
+
+//在循环渲染中，通过迭代器去读取map中的数据然后进行绘制,r表示的是反向迭代器
+for(std::map<float,glm::vec3>::reverse_iterator it = sorted.rbegin(); it != sorted.rend(); ++it) 
+{
+    model = glm::mat4();
+    model = glm::translate(model, it->second);              
+    shader.setMat4("model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+```
+
+<div style="border:1px solid #fff;background-color:red;margin:10px;padding:15px;border-radius:5px;color:#fff"><p>虽然按照距离排序物体这种方法对我们这个场景能够正常工作，但它并没有考虑旋转、缩放或者其它的变换，奇怪形状的物体需要一个不同的计量，而不是仅仅一个位置向量。</p><p>在场景中排序物体是一个很困难的技术，很大程度上由你场景的类型所决定，更别说它额外需要消耗的处理能力了。完整渲染一个包含不透明和透明物体的场景并不是那么容易。更高级的技术还有次序无关透明度(Order Independent Transparency, OIT)，但这超出本教程的范围了。现在，你还是必须要普通地混合你的物体，但如果你很小心，并且知道目前方法的限制的话，你仍然能够获得一个比较不错的混合实现。</p></div>
 
