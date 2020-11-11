@@ -291,4 +291,102 @@ glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 ​		你可以看到，我们可以绑定多个`Uniform`缓冲到不同的绑定点上。因**为着色器A和着色器B都有一个链接到绑定点0的Uniform块**，**它们的Uniform块将会共享相同的uniform数据，`uboMatrices`，前提条件是两个着色器都定义了相同的`Matrices Uniform`块。**
 
-​		为了将Uniform块绑定到一个特定的绑定点中，我们需要调用`glUniformBlockBinding`函数，它的第一个参数是一个程序对象，之后是一个Uniform块索引和链接到的绑定点。Uniform块索引(Uniform Block Index)是着色器中已定义Uniform块的位置值索引。这可以通过调用`glGetUniformBlockIndex`来获取，它接受一个程序对象和Uniform块的名称。我们可以用以下方式将图示中的Lights Uniform块链接到绑定点2：
+​		**为了将Uniform块绑定到一个特定的绑定点中，我们需要调用`glUniformBlockBinding`函数，它的第一个参数是一个程序对象，之后是一个Uniform块索引和链接到的绑定点。Uniform块索引(Uniform Block Index)是着色器中已定义Uniform块的位置值索引。**这可以通过调用`glGetUniformBlockIndex`来获取，它接受一个程序对象和Uniform块的名称。我们可以用以下方式将图示中的Lights Uniform块链接到绑定点2：
+
+```c++
+unsigned int lights_index = glGetUniformBlockIndex(shaderA.ID, "Lights");   
+glUniformBlockBinding(shaderA.ID, lights_index, 2);
+//注意我们需要对每个着色器重复这一步骤。
+```
+
+<div style="border-radius:5px;margin:15px;padding:10px;border:2px solid #AFDFAF ;background-color:#D8F5D8">
+从OpenGL 4.2版本起，你也可以添加一个布局标识符，显式地将Uniform块的绑定点储存在着色器中，这样就不用再调用glGetUniformBlockIndex和glUniformBlockBinding了。下面的代码显式地设置了Lights Uniform块的绑定点。
+</div>
+
+```glsl
+layout(std140, binding = 2) uniform Lights { ... };
+```
+
+```c++
+//使用这两个函数中任意一个，将uniform缓冲对象绑定在相同的绑定点上
+glBindBufferBase(GL_UNIFORM_BUFFER, 2, uboExampleBlock);
+glBindBufferRange(GL_UNIFROM_BUFFER, 2, uboExampleBlock, 0, 152);
+```
+
+​		`glBindbufferBase`需要**一个目标，一个绑定点索引和一个`Uniform`缓冲对象作为它的参数**。这个函数将`uboExampleBlock`链接到绑定点2上，自此，绑定点的两端都链接上了。你也可以使用`glBindBufferRange`函数，**它需要一个附加的偏移量和大小参数，这样子你可以绑定`Uniform`缓冲的特定一部分到绑定点中**。**通过使用`glBindBufferRange`函数，你可以让多个不同的`Uniform`块绑定到同一个Uniform缓冲对象上**。
+
+​		现在，所有的东西都配置完毕了，我们可以开始向`Uniform`缓冲中添加数据了。只要我们需要，就可以使用`glBufferSubData`函数，用一个字节数组添加所有的数据，或者更新缓冲的一部分。要想更新`uniform`变量`boolean`，我们可以用以下方式更新`Uniform`缓冲对象：
+
+```
+glBindBuffer(GL_UNIFORM_BUFFER, uboExampleBlock);
+int b = true;
+glBufferSubData(GL_UNIFORM_BUFFER, 144, 4, &b);
+glBindBuffer(GL_UNIFROM_BUFFER, 0);
+```
+
+### 简单示例
+
+```glsl
+//先定义顶点着色器
+#version 330 core
+layout(location = 0) in vec3 aPos;
+
+layout(std140) uniform  Marices{
+    mat4 view;
+    mat4 projection;
+}; 
+
+uniform mat4 model;
+void main(){
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+```
+
+```c++
+unsigned int uniformBlockIndexRed    = glGetUniformBlockIndex(shaderRed.ID, "Matrices");
+unsigned int uniformBlockIndexGreen  = glGetUniformBlockIndex(shaderGreen.ID, "Matrices");
+unsigned int uniformBlockIndexBlue   = glGetUniformBlockIndex(shaderBlue.ID, "Matrices");
+unsigned int uniformBlockIndexYellow = glGetUniformBlockIndex(shaderYellow.ID, "Matrices");  
+
+glUniformBlockBinding(shaderRed.ID,    uniformBlockIndexRed, 0);
+glUniformBlockBinding(shaderGreen.ID,  uniformBlockIndexGreen, 0);
+glUniformBlockBinding(shaderBlue.ID,   uniformBlockIndexBlue, 0);
+glUniformBlockBinding(shaderYellow.ID, uniformBlockIndexYellow, 0);
+
+unsigned int uboMatrices
+glGenBuffers(1, &uboMatrices);
+
+glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
+glBufferData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), NULL, GL_STATIC_DRAW);
+glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+glBindBufferRange(GL_UNIFORM_BUFFER, 0, uboMatrices, 0, 2 * sizeof(glm::mat4));
+
+glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width/(float)height, 0.1f, 100.0f);
+glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
+glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), glm::value_ptr(projection));
+glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+glm::mat4 view = camera.GetViewMatrix();           
+glBindBuffer(GL_UNIFORM_BUFFER, uboMatrices);
+glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), glm::value_ptr(view));
+glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+glBindVertexArray(cubeVAO);
+shaderRed.use();
+glm::mat4 model;
+model = glm::translate(model, glm::vec3(-0.75f, 0.75f, 0.0f));  // 移动到左上角
+shaderRed.setMat4("model", model);
+glDrawArrays(GL_TRIANGLES, 0, 36);        
+// ... 绘制绿色立方体
+// ... 绘制蓝色立方体
+// ... 绘制黄色立方体 
+```
+
+### 总结
+
+​		因为修改了模型矩阵，每个立方体都移动到了窗口的一边，并且由于使用了不同的片段着色器，它们的颜色也不同。这只是一个很简单的情景，我们可能会需要使用Uniform缓冲对象，但**任何大型的渲染程序都可能同时激活有上百个着色器程序，这时候Uniform缓冲对象的优势就会很大地体现出来了。**
+
+​		Uniform缓冲对象比起独立的uniform有很多好处。**第一，一次设置很多uniform会比一个一个设置多个uniform要快很多。第二，比起在多个着色器中修改同样的uniform，在Uniform缓冲中修改一次会更容易一些。最后一个好处可能不会立即显现，如果使用Uniform缓冲对象的话，你可以在着色器中使用更多的uniform。OpenGL限制了它能够处理的uniform数量，这可以通过GL_MAX_VERTEX_UNIFORM_COMPONENTS来查询。**当使用Uniform缓冲对象时，最大的数量会更高。所以，当你达到了uniform的最大数量时（比如再做骨骼动画(Skeletal Animation)的时候），你总是可以选择使用Uniform缓冲对象。
+
+​		
