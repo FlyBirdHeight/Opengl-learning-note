@@ -24,7 +24,7 @@
 
   ​	所以，通过使用模板缓冲，我们可以根据场景中已绘制的其它物体的片段，来决定是否丢弃特定的片段。
 
-  ​	你可以启用GL_STENCIL_TEST来启用模板测试。在这一行代码之后，所有的渲染调用都会以某种方式影响着模板缓冲。
+  ​	你可以启用`GL_STENCIL_TEST`来启用模板测试。在这一行代码之后，所有的渲染调用都会以某种方式影响着模板缓冲。
 
 ```c++
 //启用模板测试
@@ -43,7 +43,7 @@ glStencilMask(0x00); // 每一位在写入模板缓冲时都会变成0（禁用�
 
 `glStencilFunc(GLenum func, GLint ref, GLuint mask)`一共包含三个参数：
 
-- func: 设置模板测试函数。这个测试函数将会被用到已经储存的模板值上和`glStencilFunc`函数的`ref`值上。可用的选项有：`GL_NEVER`、`GL_LESS`、`GL_LEQUAL`、`GL_GREATER`、`GL_GEQUAL`、`GL_EQUAL`、`GL_NOTEQUAL`和`GL_ALWAYS`。它们的语义和深度缓冲的函数类似。
+- `func`: 设置模板测试函数。这个测试函数将会被用到已经储存的模板值上和`glStencilFunc`函数的`ref`值上。可用的选项有：`GL_NEVER`、`GL_LESS`、`GL_LEQUAL`、`GL_GREATER`、`GL_GEQUAL`、`GL_EQUAL`、`GL_NOTEQUAL`和`GL_ALWAYS`。它们的语义和深度缓冲的函数类似。
 - `ref`: 设置了模板测试的参考值。模板缓冲的内容将会与这个值进行比较
 - `mask`：设置一个掩码，它将会与参考值和储存的模板值在测试比较它们之前进行与(AND)运算。初始情况下所有位都为1。
 
