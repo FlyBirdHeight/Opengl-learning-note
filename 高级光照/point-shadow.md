@@ -16,7 +16,7 @@
 
 ## 生成深度立方体贴图
 
-​		为创建一个光周围的深度值的立方体贴图，我们必须**渲染场景6次：每次一个面**。显然**渲染场景6次需要6个不同的视图矩阵，每次把一个不同的立方体贴图面附加到帧缓冲对象上**。这看起来是这样的：
+​		为创建一个光周围的深度值的立方体贴图（包围盒bounding box），我们必须**渲染场景6次：每次一个面**。显然**渲染场景6次需要6个不同的视图矩阵，每次把一个不同的立方体贴图面附加到帧缓冲对象上**。这看起来是这样的：
 
 ```glsl
 for(int i = 0; i < 6; i++){
@@ -137,8 +137,8 @@ void main(){
 ```glsl
 //几何着色器
 #version 330 core
-layout(triangels) in;
-layout(triangel_strip, max_vertices = 18) out;
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 18) out;
 
 uniform mat4 shadowMatrices[6];
 
@@ -183,7 +183,7 @@ void main(){
 
 ​		这个过程和定向阴影映射教程相似，尽管这次我们绑定的深度贴图是一个立方体贴图，而不是2D纹理，并且将光的投影的远平面发送给了着色器。
 
-```glsl
+```c++
 glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 shader.Use();  
@@ -192,5 +192,158 @@ glActiveTexture(GL_TEXTURE0);
 glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
 // ... bind other textures
 RenderScene();
+```
+
+​		这里的`renderScene`函数在一个大立方体房间中渲染一些立方体，它们散落在大立方体各处，**光源在场景中央。**
+
+​		顶点着色器和像素着色器和原来的阴影映射着色器大部分都一样：不同之处是**在光空间中像素着色器不再需要一个`fragment`位置，现在我们可以使用一个方向向量采样深度值**。
+
+​		因为这个顶点着色器不再需要将他的位置向量变换到光空间，所以我们可以去掉`FragPosLightSpace`变量：
+
+```glsl
+#version 330 core
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 normal;
+layout(location = 2) in vec2 texCoords;
+
+out VS_OUT{
+    vec3 FragPos;
+    vec3 Normal;
+    vec2 TexCoords;
+} vs_out;
+
+uniform mat4 projection;
+uniform mat4 view;
+uniform mat4 model;
+
+void main(){
+    gl_Position = projection * view * model * vec4(position, 1.0f);
+    vs_out.FragPos = vec3(model * vec4(position, 1.0));
+    vs_out.Normal = normal;
+    vs_out.TexCoords = texCoords;
+}
+```
+
+片段着色器
+
+```glsl
+#version 330 core
+out vec4 FragColor;
+
+in VS_OUT{
+	vec3 FragPos;
+	vec3 Normal;
+	vec2 TexCoords;
+} fs_in;
+
+uniform sampler2D diffuseTexture;
+uniform samplerCube depthMap;
+
+uniform vec3 lightPos;
+uniform vec3 viewPos;
+
+uniform float far_planes;
+
+float ShadowCalculation(vec3 fragPos){
+
+}
+
+void main(){
+	vec color = texture(diffuseTexture, fs_in.TexCoords).rgb;
+	vec normal = normalize(fs_in.Normal);
+	vec lightColor = vec3(0.3);
+	//环境光
+	vec3 ambient = 0.3 * color;
+	//漫反射
+	vec3 lightDir = normalize(lightPos - fs_in.FragPos);
+	float diff = max(dot(lightDir, normal), 0.0);
+	vec3 diffuse = diff * lightColor;
+	//镜面反射光
+	vec3 viewDir = normalize(viewPos - fs_in.FragPos);
+	float spec = 0.0;
+	vec3 halfwayDir = normalize(lightDir + viewDir);
+	spec = pow(max(dot(halfwayDir, normal), 0.0),64.0);
+	vec3 specular = spec * lightColor;
+	float shadow = ShadowCalculation(fs_in.FragPos);                      
+    vec3 lighting = (ambient + (1.0 - shadow) * (diffuse + specular)) * color;    
+
+    FragColor = vec4(lighting, 1.0f);
+}
+```
+
+​		有一些细微的不同：光照代码一样，但**我们现在有了一个uniform变量`samplerCube`，`shadowCalculation`函数用fragment的位置作为它的参数，取代了光空间的fragment位置。我们现在还要引入光的视锥的远平面值，后面我们会需要它**。像素着色器的最后，我们计算出阴影元素，当fragment在阴影中时它是1.0，不在阴影中时是0.0。我们**使用计算出来的阴影元素去影响光照的diffuse和specular元素**。
+
+​		在`ShadowCalculation`函数中有很多不同之处，**现在是从立方体贴图中进行采样，不再使用2D纹理了**。我们来一步一步的讨论一下的它的内容。
+
+​		我们需要做的第一件事是**获取立方体贴图的深度**。你可能已经从教程的立方体贴图部分想到，我们已经将深度储存为fragment和光位置之间的距离了；我们这里采用相似的处理方式：
+
+```glsl
+float ShadowCalculation(vec3 fragPos){
+	//计算物体在光空间中的位置
+	vec3 fragToLight = fragPos - lightPos;
+	//获取光照射到物体上的最近深度值
+	float closestDepth = texture(depthMap, fragToLight).r;
+    //转换closestDepth的值为(0, far_plane)之间
+    closestDepth *= far_plane;
+    //获取物体和光源之间的深度值
+    float currentDepth = length(fragToLight);
+    //bias插入法，放置阴影走样问题
+    float bias = 0.05; 
+	float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
+    
+    return shadow;
+}
+```
+
+## 显示立方体贴图深度缓冲
+
+```glsl
+FragColor = vec4(vec3(closestDepth / far_plane), 1.0);
+```
+
+## PCF
+
+​		**由于万向阴影贴图基于传统阴影映射的原则，它便也继承了由解析度产生的非真实感。如果你放大就会看到锯齿边了**。PCF或称Percentage-closer filtering允许我们通过对fragment位置周围过滤多个样本，并对结果平均化。
+
+​		如果我们用和前面教程同样的那个简单的PCF过滤器，并加入第三个维度，就是这样的：
+
+```glsl
+float shadow = 0.0;
+float bias = 0.05; 
+float samples = 4.0;
+float offset = 0.1;
+for(float x = -offset; x < offset; x += offset / (samples * 0.5))
+{
+    for(float y = -offset; y < offset; y += offset / (samples * 0.5))
+    {
+        for(float z = -offset; z < offset; z += offset / (samples * 0.5))
+        {
+            float closestDepth = texture(depthMap, fragToLight + vec3(x, y, z)).r; 
+            closestDepth *= far_plane;   // Undo mapping [0;1]
+            if(currentDepth - bias > closestDepth)
+                shadow += 1.0;
+        }
+    }
+}
+shadow /= (samples * samples * samples);
+```
+
+​		这段代码和我们传统的阴影映射没有多少不同。这里我们根据样本的数量动态计算了纹理偏移量，**我们在三个轴向采样三次，最后对子样本进行平均化**。
+
+​		现在阴影看起来更加柔和平滑了，由此得到更加真实的效果：
+
+​		然而，samples设置为4.0，每个fragment我们会得到总共64个样本，这太多了！
+
+​		大多数这些采样都是多余的，与其在原始方向向量附近处采样，不如在采样方向向量的垂直方向进行采样更有意义。可是，没有（简单的）方式能够指出哪一个子方向是多余的，这就难了。**有个技巧可以使用，用一个偏移量方向数组，它们差不多都是分开的，每一个指向完全不同的方向，剔除彼此接近的那些子方向**。下面就是一个有着20个偏移方向的数组：
+
+```glsl
+vec3 sampleOffsetDirections[20] = vec3[]
+(
+   vec3( 1,  1,  1), vec3( 1, -1,  1), vec3(-1, -1,  1), vec3(-1,  1,  1), 
+   vec3( 1,  1, -1), vec3( 1, -1, -1), vec3(-1, -1, -1), vec3(-1,  1, -1),
+   vec3( 1,  1,  0), vec3( 1, -1,  0), vec3(-1, -1,  0), vec3(-1,  1,  0),
+   vec3( 1,  0,  1), vec3(-1,  0,  1), vec3( 1,  0, -1), vec3(-1,  0, -1),
+   vec3( 0,  1,  1), vec3( 0, -1,  1), vec3( 0, -1, -1), vec3( 0,  1, -1)
+);
 ```
 
