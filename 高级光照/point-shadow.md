@@ -347,3 +347,32 @@ vec3 sampleOffsetDirections[20] = vec3[]
 );
 ```
 
+​		然后我们把PCF算法与从`sampleOffsetDirections`得到的样本数量进行适配，使用它们从立方体贴图里采样。这么做的好处是与之前的PCF算法相比，我们需要的样本数量变少了。
+
+```glsl
+float shadow = 0.0;
+float bias = 0.15;
+int samples = 20;
+float viewDistance = length(viewPos - fragPos);
+float diskRadius = 0.05;
+for(int i = 0; i < samples; ++i)
+{
+    float closestDepth = texture(depthMap, fragToLight + sampleOffsetDirections[i] * diskRadius).r;
+    closestDepth *= far_plane;   // Undo mapping [0;1]
+    if(currentDepth - bias > closestDepth)
+        shadow += 1.0;
+}
+shadow /= float(samples);
+```
+
+​		这里我们把**一个偏移量添加到指定的`diskRadius`中，它在`fragToLight`方向向量周围从立方体贴图里采样**。
+
+​		另一个在这里可以应用的有意思的技巧是，我们**可以基于观察者里一个fragment的距离来改变`diskRadius`**；这样我们就能根据观察者的距离来增加偏移半径了，当距离更远的时候阴影更柔和，更近了就更锐利。
+
+```glsl
+float diskRadius = (1.0 + (viewDistance / far_plane)) / 25.0;
+```
+
+​		当然了，我们添加到每个样本的bias（偏移）高度依赖于上下文，总是要根据场景进行微调的。试试这些值，看看怎样影响了场景。 这里是最终版本的顶点和像素着色器。
+
+​		使用几何着色器来生成深度贴图不会一定比每个面渲染场景6次更快。使用几何着色器有它自己的性能局限，在第一个阶段使用它可能获得更好的性能表现。这取决于环境的类型，以及特定的显卡驱动等等。
