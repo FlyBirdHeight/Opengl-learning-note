@@ -140,7 +140,7 @@ void main(){
         for(int i = 1; i < 5; ++i)
         {
             //右边的
-            result += texture(image, TexCoords + vec2(tex_offset.x * i, 0.0)).rgb * weight[i];
+                result += texture(image, TexCoords + vec2(tex_offset.x * i, 0.0)).rgb * weight[i];
             //左边的
             result += texture(image, TexCoords - vec2(tex_offset.x * i, 0.0)).rgb * weight[i];
         }
@@ -164,6 +164,77 @@ void main(){
 ​		我们为图像的模糊处理创建两个基本的帧缓冲，每个只有一个颜色缓冲纹理：
 
 ```c++
-
+unsigned int pingpongFBO[2];
+unsigned int pingpongBuffer[2];
+glGenFramebuffers(2, pingpongFBO);
+glGenTextures(2, pingpongBuffer);
+for (unsigned int i = 0; i < 2; i++)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, pingpongFBO[i]);
+    glBindTexture(GL_TEXTURE_2D, pingpongBuffer[i]);
+    glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGB16F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGB, GL_FLOAT, NULL
+    );
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pingpongBuffer[i], 0
+    );
+}
+//用提取出来的亮区纹理填充一个帧缓冲，然后对其模糊处理10次（5次垂直5次水平）
+bool horizontal = true, first_iteration = true;
+unsigned int amount = 10;
+shaderBlur.Use();
+for (int i = 0; i < amount; i++)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, pingpongFBO[horizontal]); 
+    shaderBlur.setBool("horizontal", horizontal);
+    glBindTexture(
+        GL_TEXTURE_2D, first_iteration ? colorBuffers[1] : pingpongBuffers[!horizontal]
+    ); 
+    RenderQuad();
+    horizontal = !horizontal;
+    if (first_iteration)
+        first_iteration = false;
+}
+glBindFramebuffer(GL_FRAMEBUFFER, 0);
 ```
+
+​		每次循环我们根据我们打算渲染的是水平还是垂直来绑定两个缓冲其中之一，而将另一个绑定为纹理进行模糊。第一次迭代，因为两个颜色缓冲都是空的所以我们随意绑定一个去进行模糊处理。重复这个步骤10次，**亮区图像就进行一个重复5次的高斯模糊了。这样我们可以对任意图像进行任意次模糊处理；高斯模糊循环次数越多，模糊的强度越大。**
+
+​		通过对提取亮区纹理进行5次模糊，我们就得到了一个正确的模糊的场景亮区图像。
+
+​		泛光的最后一步是把模糊处理的图像和场景原来的HDR纹理进行结合。
+
+## 纹理混合
+
+​		有了场景的HDR纹理和模糊处理的亮区纹理，我们只需把它们结合起来就能实现泛光或称光晕效果了。最终的像素着色器（大部分和HDR教程用的差不多）要把两个纹理混合：
+
+```glsl
+#version 330 core
+out vec4 FragColor;
+in vec2 TexCoords;
+uniform sampler2D scene;
+uniform sampler2D bloomBlur;
+uniform float exposure;
+
+void main(){
+	const float gamma = 2.2;
+	vec3 hdrColor = texture(scene, TexCoords).rgb;
+	vec3 bloomColor = texture(bloomBlur, TexCoords).rgb;
+	hdrCOlor += bloomColor;
+	
+	vec3 result = vec3(1.0) - exp(-hdrColor * exposure);
+	result = pow(result, vec3(1.0 / gamma));
+	FragColor = vec4(result, 1.0f);
+}
+```
+
+​		要注意的是我们要在应用色调映射之前添加泛光效果。这样添加的亮区的泛光，也会柔和转换为LDR，光照效果相对会更好。
+
+​		把两个纹理结合以后，场景亮区便有了合适的光晕特效。
+
+​		这里我们只是用了一个相对简单的高斯模糊过滤器，它在每个方向上只有5个样本。通过沿着更大的半径或重复更多次数的模糊，进行采样我们就可以提升模糊的效果。因为**模糊的质量与泛光效果的质量正相关**，**提升模糊效果就能够提升泛光效果。有些提升将模糊过滤器与不同大小的模糊kernel或采用多个高斯曲线来选择性地结合权重结合起来使用。**
 
