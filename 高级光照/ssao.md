@@ -324,7 +324,7 @@ occlusion += (sampleDepth >= sample.z ? 1.0 : 0.0);
 
 ![avatar](../image/ssao_range_check.png)
 
-​		我们**引入一个范围测试从而保证我们只当被测深度值在取样半径内时影响遮蔽因子**。将代码最后一行换成：
+​		我们**引入一个范围测试从而保证当被测深度值在取样半径内时影响遮蔽因子**。将代码最后一行换成：
 
 ```glsl
 float rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleDepth));
