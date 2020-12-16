@@ -35,7 +35,7 @@ for(int i = 0; i < 6; i++){
 GLuint depthCubemap;
 glGenTextures(1, &depthCubemap);
 //生成立方体贴图的每个面，并使它们作为2D深度值纹理图像(不知道的可以看一下shadding-mapping那节课)
-const GLuint SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
+const unsigned int SHADOW_WIDTH = 1024, SHADOW_HEIGHT = 1024;
 glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
 for (GLuint i = 0; i < 6; ++i){
 	glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
