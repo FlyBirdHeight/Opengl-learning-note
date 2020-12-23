@@ -107,7 +107,7 @@ $$
 
 <img src="../image/ibl_pdf.png" alt="avatar" style="zoom:80%;" />
 
- 		从该图中我们可以看出，如果我们对人口任意随机采样，那么挑选身高为 1.70 的人口样本的可能性更高，而样本身高为 1.50 的概率较低。
+​		从该图中我们可以看出，如果我们对人口任意随机采样，那么挑选身高为 1.70 的人口样本的可能性更高，而样本身高为 1.50 的概率较低。
 
 ​		当涉及蒙特卡洛积分时，某些样本可能比其他样本具有更高的生成概率。这就是为什么对于任何一般的蒙特卡洛估计，我们都会**根据 pdf 将采样值除以或乘以采样概率**。到目前为止，我们每次需要估算积分的时候，**生成的样本都是均匀分布的，概率完全相等**。到目前为止，我们的估计是无偏的，这**意味着随着样本数量的不断增加，我们最终将收敛到积分的精确解。**
 
@@ -485,3 +485,257 @@ L_o(p,\omega_o) =
         *
         \int\limits_{\Omega} f_r(p, \omega_i, \omega_o) n \cdot \omega_i d\omega_i
 $$
+
+​		我们已经在预过滤贴图的各个粗糙度级别上预计算了分割求和近似的左半部分。右半部分要求我们在$n \cdot \omega_o$、表面粗糙度、菲涅尔系数 $F_0$上计算 BRDF 方程的卷积。这等同于在纯白的环境光或者辐射度恒定为 $L_i$=1.0 的设置下，对镜面 BRDF 求积分。对3个变量做卷积有点复杂，不过我们可以把$F_0$移出镜面 BRDF 方程：
+$$
+\int\limits_{\Omega} f_r(p, \omega_i, \omega_o) n \cdot \omega_i d\omega_i = \int\limits_{\Omega} f_r(p, \omega_i, \omega_o) \frac{F(\omega_o, h)}{F(\omega_o, h)} n \cdot \omega_i d\omega_i
+$$
+
+> 这里就是将菲涅尔方程提取了出来
+
+​		$F$为菲涅耳方程。将菲涅耳分母移到 BRDF 下面可以得到如下等式：
+$$
+\int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} F(\omega_o, h)  n \cdot \omega_i d\omega_i
+$$
+​		用 Fresnel-Schlick 近似公式替换右边的 $F$可以得到：
+$$
+\int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} (F_0 + (1 - F_0){(1 - \omega_o \cdot h)}^5)  n \cdot \omega_i d\omega_i
+$$
+
+> 这里$\omega_o$相当于$v$观察者向量	
+
+​		让我们用$\alpha$替换${(1 - \omega_o \cdot h)}^5$以便更轻松地求解$F_0$:
+$$
+\int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} (F_0 + (1 - F_0)\alpha)  n \cdot \omega_i d\omega_i
+$$
+
+$$
+\int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} (F_0 + 1*\alpha - F_0*\alpha)  n \cdot \omega_i d\omega_i
+$$
+
+$$
+\int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} (F_0 * (1 - \alpha) + \alpha)  n \cdot \omega_i d\omega_i
+$$
+
+​		然后我们将菲涅耳函数$F$分拆到两个积分里：
+
+> 其实这里也就是为了能够将其拆分开，主要是因为$F_0$是一个确定项，未知项其实只有$\omega_o$和采样的半程向量$h$，也就是观察者向量
+
+$$
+\int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} (F_0 * (1 - \alpha))  n \cdot \omega_i d\omega_i
+              +
+    \int\limits_{\Omega} \frac{f_r(p, \omega_i, \omega_o)}{F(\omega_o, h)} (\alpha)  n \cdot \omega_i d\omega_i
+$$
+
+​		这样，$F_0$在整个积分上是恒定的，我们可以从积分中提取出$F_0$。接下来，我们将$\alpha$替换回其原始形式，从而得到最终分割求和的 BRDF 方程：
+$$
+F_0 \int\limits_{\Omega} f_r(p, \omega_i, \omega_o)(1 - {(1 - \omega_o \cdot h)}^5)  n \cdot \omega_i d\omega_i
+              +
+    \int\limits_{\Omega} f_r(p, \omega_i, \omega_o) {(1 - \omega_o \cdot h)}^5  n \cdot \omega_i d\omega_i
+$$
+​		公式中的两个积分分别表示 $F_0$的**比例和偏差**。注意，由于$f(p, \omega_i, \omega_o)$已经包含 $F$项，它们被约分了，这里的$f$中不计算$F$项。
+
+> 这个比例和偏差很好理解，一个是$F_0$的系数，一个是$F_0$减去的项。
+>
+> 这里f 不计算菲涅尔方程项，是因为上面的分母是菲涅尔项，已经被约分了，这里只是没有加上，所以不需要计算了
+
+​		和之前卷积环境贴图类似，我们可以**对 BRDF 方程求卷积**，其**输入是$n$和$\omega_o$的夹角**，以及**粗糙度**，并将卷积的结果存储在纹理中。我们将卷积后的结果存储在 2D 查找纹理（Look Up Texture, LUT）中，这张纹理被称为 **BRDF 积分贴图**，稍后会将其用于 PBR 光照着色器中，以获得间接镜面反射的最终卷积结果。
+
+​		BRDF 卷积着色器在 2D 平面上执行计算，直接使用其 2D 纹理坐标作为卷积输入（NdotV 和 roughness）。代码与预滤波器的卷积代码大体相似，不同之处在于，它现在根据 BRDF 的几何函数和 Fresnel-Schlick 近似来处理采样向量：
+
+```glsl
+vec2 IntegrateBRDF(float NdotV, flout roughness){
+    vec3 V;
+    //sin$\theta$
+    V.x = sqrt(1.0 - NdotV * NdotV);
+    V.y = 0.0;
+    //cos$\theta$
+    V.z = NdotV;
+    
+    float A = 0.0;
+    float B = 0.0;
+    
+    vec3 N = vec3(0.0, 0.0, 1.0);
+    
+    const unsigned int SAMPLE_COUNT = 1024;
+    for(int i = 0; i < SAMPLE_COUNT; ++i){
+       	vec2 Xi = Hammersley(i, SAMPLE_COUNT);
+        //这里实际采样的向量就是我们平常使用的半程向量，可以看一下之前的笔记
+        vec3 H  = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+        
+        float NdotL = max(L.z, 0.0);
+        float NdotH = max(H.z, 0.0);
+        float VdotH = max(dot(V, H), 0.0);
+        if(NdotL > 0.0)
+        {
+            float G = GeometrySmith(N, V, L, roughness);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV);
+            float Fc = pow(1.0 - VdotH, 5.0);
+
+            A += (1.0 - Fc) * G_Vis;
+            B += Fc * G_Vis;
+        }
+    }
+    A /= float(SAMPLE_COUNT);
+    B /= float(SAMPLE_COUNT);
+    return vec2(A, B);
+}
+
+void main() 
+{
+    vec2 integratedBRDF = IntegrateBRDF(TexCoords.x, TexCoords.y);
+    FragColor = integratedBRDF;
+}
+```
+
+​		如你所见，BRDF 卷积部分是从数学到代码的直接转换。我们将角度$\theta$和粗糙度作为输入，以重要性采样产生采样向量，在整个几何体上结合 BRDF 的菲涅耳项对向量进行处理，然后输出每个样本上$F_0$的系数和偏差，最后取平均值。
+
+​		你可能回想起[理论](https://learnopengl-cn.github.io/07 PBR/01 Theory/)教程中的一个细节：与 IBL 一起使用时，BRDF 的几何项略有不同，因为$k$变量的含义稍有不同：
+$$
+k_{direct} = \frac{(\alpha + 1)^2}{8}
+$$
+
+$$
+k_{IBL} = \frac{\alpha^2}{2}
+$$
+
+​		由于 BRDF 卷积是镜面 IBL 积分的一部分，因此我们要在 Schlick-GGX 几何函数中使用 $k_{IBL}$:
+
+```glsl
+float GeometrySchlickGGX(float NdotV, float roughness)
+{
+    float a = roughness;
+    //这里是IBL光照而不再是直线光照
+    float k = (a * a) / 2.0;
+
+    float nom   = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return nom / denom;
+}
+// ----------------------------------------------------------------------------
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
+{
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
+}  
+```
+
+​		请注意，虽然$k$还是从 a 计算出来的，但这里的 a 不是 roughness 的平方——如同最初对 a 的其他解释那样——在这里我们假装平方过了。我不确定这样处理是否与 Epic Games 或迪士尼原始论文不一致，但是直接将 roughness 赋给 a 得到的 BRDF 积分贴图与 Epic Games 的版本完全一致。
+
+​		最后，为了存储 BRDF 卷积结果，我们需要生成一张 512 × 512 分辨率的 2D 纹理。
+
+```c++
+unsigned int brdfLUTTexture;
+glGenTextures(1, &brdfLUTTexture);
+
+// pre-allocate enough memory for the LUT texture.
+glBindTexture(GL_TEXTURE_2D, brdfLUTTexture);
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, 512, 512, 0, GL_RG, GL_FLOAT, 0);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+```
+
+​		请注意，我们使用的是 Epic Games 推荐的**16位精度浮点格式**。将环绕模式设置为 `GL_CLAMP_TO_EDGE` 以防止边缘采样的伪像。 然后，我们复用同一个帧缓冲区对象，并在 NDC (译注：Normalized Device Coordinates) 屏幕空间四边形上运行此着色器：
+
+```c++
+glBindFramebuffer(GL_FRAMEBUFFER, captureFBO);
+glBindRenderbuffer(GL_RENDERBUFFER, captureRBO);
+glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, 512, 512);
+glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, brdfLUTTexture, 0);
+
+glViewport(0, 0, 512, 512);
+brdfShader.use();
+glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+RenderQuad();
+
+glBindFramebuffer(GL_FRAMEBUFFER, 0);  
+```
+
+​		预过滤的环境贴图和 BRDF 的 2D LUT 都已经齐备，我们可以根据分割求和近似法重建间接镜面部分积分了。最后合并的结果将被用作间接镜面反射或环境镜面反射。
+
+## IBL反射合成
+
+​		为了使反射方程的间接镜面反射部分正确运行，我们需要将分割求和近似法的两个部分缝合在一起。第一步是将预计算的光照数据声明到 PBR 着色器的最上面：
+
+```glsl
+uniform samplerCube prefilterMap;
+//预计算BRDF的2D纹理
+uniform sampler2D brdfLUT;
+```
+
+​		首先，使用反射向量采样预过滤的环境贴图，获取表面的间接镜面反射。请注意，我们会**根据表面粗糙度在合适的 mip 级别采样，以使更粗糙的表面产生更模糊的镜面反射**。
+
+```GLSL
+void main(){
+	[...]
+    //反射光线
+	vec3 R  = reflect(-V, N);
+    //设置最大卷积层级(0-4);
+	const float MAX_REFLECTION_LOD = 4.0;
+    //去最合适的环境贴图卷积
+	vec3 prefilteredColor = textureLod(prefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+	[...]
+}
+```
+
+​		在预过滤步骤中，我们仅将环境贴图卷积最多 5 个 mip 级别（0到4），此处记为 `MAX_REFLECTION_LOD`，以**确保不会对一个没有数据的 mip 级别采样**。 然后我们**用已知的材质粗糙度和视线-法线夹角作为输入，采样 BRDF LUT**。
+
+```glsl
+//获取菲涅尔方程结果
+vec3 F = FresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+//对BRDF纹理进行采样，使用视线-法线夹角，粗糙度进行输入；
+//这里使用视线-法线夹角，粗糙度的依据在上面已经说明了“以 BRDF 的输入$n⋅\omega_i$（范围在 0.0 和 1.0 之间）作为横坐标，以粗糙度作为纵坐标”
+vec2 envBRDF = texture(brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+//这里就是将预过滤mipmap采样出来的反射结果与BRDF结合，这里对应的公式就是上面拆分开的公式
+vec3 specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
+```
+
+​		这样我们就从 BRDF LUT 中获得了$F_0$的系数和偏移，这里我们就直接用间接光菲涅尔项 F 代替$F_0$。把这个结果和 IBL 反射方程左边的预过滤部分结合起来，以重建整个近似积分，存入specular。
+
+​		于是得到了反射方程的间接镜面反射部分。
+
+```glsl
+vec3 F = FresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+
+vec3 kS = F;
+vec3 kD = 1.0 - kS;
+kD *= 1.0 - metallic;     
+
+vec3 irradiance = texture(irradianceMap, N).rgb;
+vec3 diffuse    = irradiance * albedo;
+
+const float MAX_REFLECTION_LOD = 4.0;
+vec3 prefilteredColor = textureLod(prefilterMap, R,  roughness * MAX_REFLECTION_LOD).rgb;   
+vec2 envBRDF  = texture(brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+vec3 specular = prefilteredColor * (F * envBRDF.x + envBRDF.y);
+
+vec3 ambient = (kD * diffuse + specular) * ao; 
+```
+
+​		请注意，**specular 没有乘以 kS，因为已经乘过了菲涅耳系数**。
+
+## 最后
+
+​		希望在本教程结束时，你会对 PBR 的相关内容有一个清晰的了解，甚至可以构造并运行一个实际的 PBR 渲染器。在这几节教程中，我们已经在应用程序开始阶段，渲染循环之前，预计算了所有 PBR 相关的基于图像的光照数据。出于教育目的，这很好，但对于任何 PBR 的实践应用来说，都不是很漂亮。首先，预计算实际上只需要执行一次，而不是每次启动时都要做。其次，当使用多个环境贴图时，你必须在每次程序启动时全部预计算一遍，这是个必须步骤。
+
+​		因此，通常**只需要一次将环境贴图预计算为辐照度贴图和预过滤贴图，然后将其存储在磁盘上**（注意，**BRDF 积分贴图不依赖于环境贴图，因此只需要计算或加载一次**）。这意味着您需要提出一种自定义图像格式来存储 HDR 立方体贴图，包括其 mip 级别。或者将图像存储为某种可用格式——例如**支持存储 mip 级别的 .dds——并按其格式加载**。
+
+​		此外，我们也在教程中描述了整个过程，包括生成预计算的 IBL 图像，以帮助我们进一步了解 PBR 管线。此外还可以通过 cmftStudio 或 IBLBaker 等一些出色的工具为您生成这些预计算贴图，也很好用。
+
+​		有一点内容我们跳过了，即如何将预计算的立方体贴图作为反射探针：**立方体贴图插值和视差校正**。这是一个**在场景中放置多个反射探针的过程，这些探针在特定位置拍摄场景的立方体贴图快照，然后我们可以将其卷积，作为相应部分场景的 IBL 数据**。基于相机的位置对附近的探针插值，我们可以**实现局部的细节丰富的 IBL，受到的唯一限制就是探针放置的数量**。这样一来，例如从一个明亮的室外部分移动到较暗的室内部分时，IBL 就能正确更新。我将来会在某个地方编写有关反射探针的教程，但现在，我建议阅读下面 Chetan Jags 的文章来作为入门。
+
+- [Real Shading in Unreal Engine 4](http://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf)：讲解了 Epic Games 的分割求和近似法。IBL PBR 部分的代码就脱胎于此文。
+- [Physically Based Shading and Image Based Lighting](http://www.trentreed.net/blog/physically-based-shading-and-image-based-lighting/)：Trent Reed 的精彩博客文章，介绍了如何将镜面反射 IBL 实时集成到 PBR 管道中。
+- [Image Based Lighting](https://chetanjags.wordpress.com/2015/08/26/image-based-lighting/)：Chetan Jags 对基于镜面反射的 IBL 及其一些注意事项（包括光照探针插值）进行了广泛的讲解。
+- [Moving Frostbite to PBR](https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf)：Sébastien Lagarde 和 Charles de Rousiers 撰写的，对于如何将 PBR 集成到 AAA 游戏引擎进行了详尽而深入的概述。
+- [Physically Based Rendering – Part Three](https://jmonkeyengine.github.io/wiki/jme3/advanced/pbr_part3.html)：JMonkeyEngine 团队对 IBL 和 PBR 进行了较高层次的概述。
+- [Implementation Notes: Runtime Environment Map Filtering for Image Based Lighting](https://placeholderart.wordpress.com/2015/07/28/implementation-notes-runtime-environment-map-filtering-for-image-based-lighting/)：Padraic Hennessy 撰写的大量有关预过滤 HDR 环境贴图并显著优化采样过程的文章。
+
