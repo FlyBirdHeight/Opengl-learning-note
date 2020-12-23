@@ -252,4 +252,236 @@ vec2 HammersleyNoBitOps(unsigned int i, uint N){
 
 ### GGX重要性采样
 
-​		有别于均匀或纯随机地（比如蒙特卡洛）在积分半球 $\Omega$产生采样向量，我们的采样会根**据粗糙度，偏向微表面的半向量的宏观反射方向**。采样过程将与我们之前看到的过程相似：开始一个大循环，生成一个随机（低差异）序列值，用该序列值在切线空间中生成样本向量，将样本向量变换到世界空间并对场景的辐射度采样。不同之处在于，我们现在使用低差异序列值作为输入来生成采样向量：
+​		有别于均匀或纯随机地（比如蒙特卡洛）在积分半球 $\Omega$产生采样向量，我们的采样会根**据粗糙度，偏向微表面的半向量的宏观反射方向**。采样过程将与我们之前看到的过程相似：**开始一个大循环，生成一个随机（低差异）序列值，用该序列值在切线空间中生成样本向量，将样本向量变换到世界空间并对场景的辐射度采样**。不同之处在于，我们现在使用低差异序列值作为输入来生成采样向量：
+
+```c++
+//源代码中是在glsl中生成，这里在c++中生成，当然也是可以转到GLSL中
+const unsigned int SAMPLE_COUNT = 4096u;
+for(int i = 0; i < SAMPLE_COUNT; ++i){
+	std::vector<glm::vec2> xi = sequence.getVec2();	  
+}
+```
+
+​		此外，要构建采样向量，我们需要一些方法定向和偏移采样向量，以使其朝向特定粗糙度的镜面波瓣方向。我们可以如理论教程中所述使用 NDF（正态分布），并将 GGX NDF 结合到 Epic Games 所述的球形采样向量的处理中：
+
+```glsl
+vec3 ImportanceSampleGGX(vec2 xi, vec3 N, float roughness){
+    float a = roughness * roughtness;
+    float phi = 2.0 * PI * xi.x;
+    float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a*a - 1.0) * xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+    //将平面投影到球面上
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+
+    //将向量从切线空间变换到世界空间中去
+    vec3 up        = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+	//采样向量生成
+    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
+```
+
+​		基于特定的粗糙度输入和低差异序列值 Xi，我们获得了一个采样向量，该向量大体围绕着预估的微表面的半向量。注意，根据迪士尼对 PBR 的研究，Epic Games **使用了平方粗糙度以获得更好的视觉效果**。
+
+> 代码中采用的余弦的原理如下:
+>
+> <img src="../image/202012221459.png" alt="avatar" style="zoom:80%;" />
+>
+> 
+>
+> ![avatar](../image/20201222150028990.png)
+
+​		使用低差异 Hammersley 序列和上述定义的样本生成方法，我们可以最终完成预滤波器卷积着色器：
+
+```glsl
+#version 330 core
+out vec4 FragColor;
+in vec3 localPos;
+
+uniform samplerCube environmentMap;
+uniform float roughness;
+const float PI = 3.14159265359;
+
+float RadicalInverse(int Base, int i);
+vec2 Hammersley(int Index, int NumSamples);
+vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness);
+float RadicalInverse(int Base, int i){
+    double Digit, Radical, Inverse;
+    Digit = Radical = 1.0 / (double)Base;
+    Inverse = 1.0;
+    while (i) {
+        Inverse += Digit * (double)(i % Base);
+        Digit *= Radical;
+
+        i /= Base;
+    }
+
+    return Inverse - 1.0;
+}
+vec2 Hammersley(int Index, int NumSamples){
+    return vec2(float(Index)/float(NumSamples), RadicalInverse(2, Index));
+}
+vec3 ImportanceSampleGGX(vec2 xi, vec3 N, float roughness){
+    float a = roughness * roughtness;
+    float phi = 2.0 * PI * xi.x;
+    float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a*a - 1.0) * xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+    //将平面投影到球面上
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+
+    //将向量从切线空间变换到世界空间中去
+    vec3 up        = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent   = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+	//采样向量生成
+    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
+void main()
+{       
+    //N -> Normal, R -> Reflect, V -> view, H -> halfWay, L -> LightPos
+    vec3 N = normalize(localPos);    
+    vec3 R = N;
+    vec3 V = R;
+
+    const int SAMPLE_COUNT = 1024u;
+    float totalWeight = 0.0;   
+    vec3 prefilteredColor = vec3(0.0);     
+    for(int i = 0u; i < SAMPLE_COUNT; ++i)
+    {
+        vec2 Xi = Hammersley(i, SAMPLE_COUNT);
+        //这里实际采样的向量就是我们平常使用的半程向量，可以看一下之前的笔记
+        vec3 H  = ImportanceSampleGGX(Xi, N, roughness);
+        vec3 L  = normalize(2.0 * dot(V, H) * H - V);
+
+        float NdotL = max(dot(N, L), 0.0);
+        if(NdotL > 0.0)
+        {
+            prefilteredColor += texture(environmentMap, L).rgb * NdotL;
+            totalWeight      += NdotL;
+        }
+    }
+    prefilteredColor = prefilteredColor / totalWeight;
+
+    FragColor = vec4(prefilteredColor, 1.0);
+}  
+```
+
+> 这里最后采样的颜色乘以了NdotL是因为:
+>
+> ![avatar](../image/20201222151716931.png)
+
+​		输入的粗糙度随着预过滤的立方体贴图的 mipmap 级别变化（从0.0到1.0），**我们根据据粗糙度预过滤环境贴图，把结果存在 prefilteredColor 里。再用 prefilteredColor 除以采样权重总和，其中对最终结果影响较小（NdotL 较小）的采样最终权重也较小。**
+
+### 捕获预过滤 mipmap 级别
+
+​		剩下要做的就是让 OpenGL 在多个 mipmap 级别上以不同的粗糙度值预过滤环境贴图。有了最开始的辐照度教程作为基础，实际上很简单：
+
+```c++
+prefilterShader.use();
+prefilterShader.setInt("environmentMap", 0);
+prefilterShader.setMat4("projection", captureProjection);
+glActiveTexture(GL_TEXTURE0);
+glBindTexture(GL_TEXTURE_CUBE_MAP, envCubemap);
+
+glBindFramebuffer(GL_FRAMEBUFFER, captureFBO);
+unsigned int maxMipLevels = 5;
+for (unsigned int mip = 0; mip < maxMipLevels; ++mip)
+{
+    // reisze framebuffer according to mip-level size.
+    unsigned int mipWidth  = 128 * std::pow(0.5, mip);
+    unsigned int mipHeight = 128 * std::pow(0.5, mip);
+    glBindRenderbuffer(GL_RENDERBUFFER, captureRBO);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mipWidth, mipHeight);
+    glViewport(0, 0, mipWidth, mipHeight);
+
+    float roughness = (float)mip / (float)(maxMipLevels - 1);
+    prefilterShader.setFloat("roughness", roughness);
+    for (unsigned int i = 0; i < 6; ++i)
+    {
+        prefilterShader.setMat4("view", captureViews[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, prefilterMap, mip);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        renderCube();
+    }
+}
+glBindFramebuffer(GL_FRAMEBUFFER, 0);   
+```
+
+​		这个过程类似于辐照度贴图卷积，但是这次我们将帧缓冲区缩放到适当的 mipmap 尺寸， mip 级别每增加一级，尺寸缩小为一半。此外，我们在 `glFramebufferTexture2D` 的最后一个参数中指定要渲染的目标 mip 级别，然后将要**预过滤的粗糙度传给预过滤着色器**。
+
+​		这样我们会得到一张经过适当预过滤的环境贴图，访问该贴图时指定的 mip 等级越高，获得的反射就越模糊。如果我们在天空盒着色器中显示这张预过滤的环境立方体贴图，并在其着色器中强制在其第一个 mip 级别以上采样，如下所示：
+
+```glsl
+vec3 envColor = textureLod(environmentMap, WorldPos, 1.2).rgb;
+```
+
+## 预过滤卷积的伪像
+
+### 高粗糙度的立方体贴图接缝
+
+​		**在具有粗糙表面的表面上对预过滤贴图采样，也就等同于在较低的 mip 级别上对预过滤贴图采样**。在对立方体贴图进行采样时，默认情况下，OpenGL不会在立方体面**之间**进行线性插值。由于较低的 mip 级别具有更低的分辨率，并且预过滤贴图代表了与更大的采样波瓣卷积，因此缺乏**立方体的面和面之间的滤波**的问题就更明显：
+
+<img src="../image/ibl_prefilter_seams.png" alt="avatar" style="zoom:67%;" />
+
+​		幸运的是，OpenGL 可以启用 `GL_TEXTURE_CUBE_MAP_SEAMLESS`，以为我们提供在立方体贴图的面之间进行正确过滤的选项：
+
+```c++
+glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+```
+
+### 预过滤卷积的亮点
+
+​		由于镜面反射中**光强度的变化大**，**高频细节多**，所以对镜面反射进行卷积需要**大量采样**，才能正确**反映 HDR 环境反射的混乱变化**。我们已经进行了大量的采样，但是在某些环境下，在某些较粗糙的 mip 级别上可能仍然不够，导致明亮区域周围出现点状图案：
+
+<img src="../image/ibl_prefilter_dots.png" alt="avatar" style="zoom:67%;" />
+
+​		一种解决方案是**进一步增加样本数量**，但在某些情况下还是不够。另一种方案如 Chetan Jags 所述，我们可以在**预过滤卷积时，不直接采样环境贴图，而是基于积分的 PDF 和粗糙度采样环境贴图的 mipmap** ，以减少伪像：
+
+```c++
+float D   = DistributionGGX(NdotH, roughness);
+float pdf = (D * NdotH / (4.0 * HdotV)) + 0.0001; 
+
+float resolution = 512.0; // resolution of source cubemap (per face)
+float saTexel  = 4.0 * PI / (6.0 * resolution * resolution);
+float saSample = 1.0 / (float(SAMPLE_COUNT) * pdf + 0.0001);
+
+float mipLevel = roughness == 0.0 ? 0.0 : 0.5 * log2(saSample / saTexel); 
+```
+
+​		既然要采样 mipmap ，不要忘记在环境贴图上开启三线性过滤
+
+```c++
+glBindTexture(GL_TEXTURE_CUBE_MAP, envCubemap);
+glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); 
+```
+
+​		设置立方体贴图的基本纹理后，让 OpenGL 生成 mipmap：
+
+```c++
+// convert HDR equirectangular environment map to cubemap equivalent
+[...]
+// then generate mipmaps
+glBindTexture(GL_TEXTURE_CUBE_MAP, envCubemap);
+glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+```
+
+## 预计算BRDF
+
+​		预过滤的环境贴图已经可以设置并运行，我们可以集中精力于求和近似的第二部分：BRDF。让我们再次简要回顾一下镜面部分的分割求和近似法
+$$
+L_o(p,\omega_o) = 
+        \int\limits_{\Omega} L_i(p,\omega_i) d\omega_i
+        *
+        \int\limits_{\Omega} f_r(p, \omega_i, \omega_o) n \cdot \omega_i d\omega_i
+$$
