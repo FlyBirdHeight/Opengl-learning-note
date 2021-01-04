@@ -162,7 +162,7 @@
    //6.计算镜面分量
    vec3 specular = specularStrength * spec * lightColor;
    //7.计算完整的光照
-   vec3 result = ambient * diffuse * specular;
+   vec3 result = ambient + diffuse + specular;
    FragColor = vec4(result,1.0);
    ```
 
