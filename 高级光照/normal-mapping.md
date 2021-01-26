@@ -65,7 +65,7 @@ void main(){
 
 ​		计算出切线和副切线并不像法线向量那么容易。从图中可以看到法线贴图的切线和副切线与纹理坐标的两个方向对齐。我们就是用到这个特性计算每个表面的切线和副切线的。需要用到一些数学才能得到它们；请看下图：
 
-<img src="C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\normal_mapping_surface_edges.png" alt="avatar" style="zoom:80%;" />
+<img src="..\image\normal_mapping_surface_edges.png" alt="avatar" style="zoom:80%;" />
 
 ​		注意上图中边$E_2$与纹理坐标的差$\Delta U_2$、$\Delta V_2$构成一个三角形。$\Delta U_2$与切线向量$T$方向相同，而$\Delta V_2$与副切线向量$B$方向相同。这也就是说，所以我们可以将三角形的边$E_1$与$E_2$写成切线向量$T$和副切线向量$B$的线性组合：
 $$
