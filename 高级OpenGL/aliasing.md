@@ -24,13 +24,13 @@
 
 ​		完整渲染后的三角形在屏幕上会是这样的：
 
-![avatar](C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\anti_aliasing_rasterization_filled.png)
+![avatar](..\image\anti_aliasing_rasterization_filled.png)
 
 ​		由于屏幕像素总量的限制，有些边缘的像素能够被渲染出来，而有些则不会。结果就是**我们使用了不光滑的边缘来渲染图元，导致之前讨论到的锯齿边缘**。
 
 ​		多重采样所做的正是将单一的采样点变为多个采样点（这也是它名称的由来）。我们**不再使用像素中心的单一采样点，取而代之的是以特定图案排列的4个子采样点(Subsample)**。我们将用这些子采样点来决定像素的遮盖度。当然，这也意味着颜色缓冲的大小会随着子采样点的增加而增加。
 
-![avatar](C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\anti_aliasing_sample_points.png)
+![avatar](..\image\anti_aliasing_sample_points.png)
 
 ​		上图的左侧展示了正常情况下判定三角形是否遮盖的方式。在例子中的这个像素上不会运行片段着色器（所以它会保持空白）。因为它的采样点并未被三角形所覆盖。上图的右侧展示的是实施多重采样之后的版本，每个像素包含有4个采样点。这里，只有两个采样点遮盖住了三角形。
 
@@ -42,13 +42,13 @@
 
 这样子做之后，颜色缓冲中所有的图元边缘将会产生一种更平滑的图形。
 
-<img src="C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\anti_aliasing_rasterization_samples.png" alt="avatar" style="zoom:80%;" />
+<img src="..\image\anti_aliasing_rasterization_samples.png" alt="avatar" style="zoom:80%;" />
 
 ​		这里，**每个像素包含4个子采样点（不相关的采样点都没有标注）**，蓝色的采样点被三角形所遮盖，而灰色的则没有。对于三角形的内部的像素，片段着色器只会运行一次，颜色输出会被存储到全部的4个子样本中。而在三角形的边缘，并不是所有的子采样点都被遮盖，所以**片段着色器的结果将只会储存到部分的子样本中。根据被遮盖的子样本的数量，最终的像素颜色将由三角形的颜色与其它子样本中所储存的颜色来决定**。
 
 ​		简单来说，**一个像素中如果有更多的采样点被三角形遮盖，那么这个像素的颜色就会更接近于三角形的颜色**。如果我们给上面的三角形填充颜色，就能得到以下的效果：
 
-<img src="C:\Users\adsionli\Desktop\note\Opengl-learning-note\image\anti_aliasing_rasterization_samples_filled.png" alt="avatar" style="zoom:67%;" />
+<img src="..\image\anti_aliasing_rasterization_samples_filled.png" alt="avatar" style="zoom:67%;" />
 
 ​		对于每个像素来说，越少的子采样点被三角形所覆盖，那么它受到三角形的影响就越小。**三角形的不平滑边缘被稍浅的颜色所包围后，从远处观察时就会显得更加平滑了。**
 
